@@ -59,7 +59,7 @@ void GUIApp::drawStage() {
     DrawRectangleRoundedLinesEx(r, 0.025f, 12, 1.0f, C_LINE);
 
     // dotted grid, clipped to the card
-    BeginScissorMode((int)r.x + 1, (int)r.y + 1, (int)r.width - 2, (int)r.height - 2);
+    Scissor((int)r.x + 1, (int)r.y + 1, (int)r.width - 2, (int)r.height - 2);
     for (float gx = r.x + 24; gx < r.x + r.width; gx += 28)
         for (float gy = r.y + 90; gy < r.y + r.height - 70; gy += 28)
             DrawRectangle((int)gx, (int)gy, 2, 2, Color{ 255, 255, 255, 9 });
@@ -146,15 +146,14 @@ void GUIApp::drawInfoLines(const Frame& f, float x, float y, float maxW) {
     }
 }
 
-static void drawChip(GUIApp* app, const Font& font, float cx, float yBottom, const std::string& text, const float* c) {
-    float size = 12.5f;
-    float w = MeasureTextEx(font, text.c_str(), size, 0).x + 14;
-    Rectangle r = { cx - w / 2, yBottom - 22, w, 20 };
+void GUIApp::drawChip(const Font& font, float cx, float yBottom, const std::string& text, const float* c) {
+    float size = 13.5f;
+    float w = TxtW(font, text, size) + 16;
+    Rectangle r = { cx - w / 2, yBottom - 24, w, 22 };
     DrawRectangleRounded(r, 0.5f, 8, Color{ 12, 14, 20, 235 });
     DrawRectangleRoundedLinesEx(r, 0.5f, 8, 1.2f, rgb(c));
-    DrawTextEx(font, text.c_str(), { std::floor(r.x + 7), std::floor(r.y + 2.5f) }, size, 0, lighten(c, 0.25f));
+    Txt(font, text, r.x + 8, r.y + 2.5f, size, lighten(c, 0.25f));
     DrawTriangle({ cx - 4, r.y + r.height + 1 }, { cx, r.y + r.height + 6 }, { cx + 4, r.y + r.height + 1 }, rgb(c));
-    (void)app;
 }
 
 static std::string markerText(const Frame& f, int index) {
@@ -200,6 +199,16 @@ void GUIApp::drawBars(const Frame& f, Rectangle area) {
 
         float h = b.h * maxH;
         Rectangle r = { startX + i * slot, baseY - h, barW, h };
+        if (view == V_SORT) {
+            Rectangle column = { startX + i * slot - (slot - barW) / 2, area.y, slot, area.height };
+            if (CheckCollisionPointRec(Mouse(), column) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) selectedBar = (selectedBar == i) ? -1 : i;
+            if (selectedBar == i) {
+                Rectangle ring = { r.x - 6, r.y - 6, barW + 12, h + 12 };
+                DrawRectangleRoundedLinesEx(ring, 0.18f, 8, 2.0f, ColorAlpha(WHITE, 0.85f));
+                float tx = r.x + barW / 2;
+                DrawTriangle({ tx, baseY + 24 }, { tx + 6, baseY + 33 }, { tx - 6, baseY + 33 }, ColorAlpha(WHITE, 0.92f));
+            }
+        }
         float gm[3]; midOf(b.tint, gm);
         glowRect(r, std::min(8.0f, barW * 0.25f), gm, b.tint.glow, 4.0f + 16.0f * std::min(1.0f, b.tint.glow));
         gradRounded(r, std::min(8.0f, barW * 0.25f), rgb(b.tint.top), rgb(b.tint.bot), false);
@@ -220,7 +229,7 @@ void GUIApp::drawBars(const Frame& f, Rectangle area) {
         TxtC(fontUI, std::to_string(i), r.x + barW / 2, baseY + 9, 12, C_MUTED);
 
         std::string mt = markerText(f, i);
-        if (!mt.empty()) drawChip(this, fontBold, r.x + barW / 2, r.y - (barW >= 18 ? 28 : 8), mt, b.tint.top);
+        if (!mt.empty()) drawChip(fontBold, r.x + barW / 2, r.y - (barW >= 18 ? 28 : 8), mt, b.tint.top);
     }
 }
 
@@ -317,7 +326,7 @@ void GUIApp::drawList(const Frame& f, Rectangle area) {
         DrawRectangleRoundedLinesEx(r, 0.3f, 10, 1.2f, ColorAlpha(WHITE, 0.22f));
         TxtC(fontBold, std::to_string(f.cells[i].value), r.x + nodeW / 2, cy - 11, 21, textOn(a.tint));
         std::string mt = markerText(f, i);
-        if (!mt.empty()) drawChip(this, fontBold, r.x + nodeW / 2, r.y - 8, mt, a.tint.top);
+        if (!mt.empty()) drawChip(fontBold, r.x + nodeW / 2, r.y - 8, mt, a.tint.top);
     }
 
     if (f.hasFloating) {
@@ -374,7 +383,7 @@ void GUIApp::drawBoxes(const Frame& f, Rectangle area) {
         }
         TxtC(fontUI, std::to_string(i), r.x + boxW / 2, r.y + boxH + 8, 13, C_MUTED);
         std::string mt = markerText(f, i);
-        if (!mt.empty()) drawChip(this, fontBold, r.x + boxW / 2, r.y - 10, mt, a.tint.top);
+        if (!mt.empty()) drawChip(fontBold, r.x + boxW / 2, r.y - 10, mt, a.tint.top);
     }
     for (int i = n; i < (int)cellAnims.size(); i++) cellAnims[i].init = false;
 
@@ -743,7 +752,7 @@ void GUIApp::drawComplexity(Rectangle area) {
     Txt(fontUI, "input size n", plot.x + plot.width / 2 - 36, plot.y + plot.height + 26, 13, C_TEXT2);
     Txt(fontUI, "steps (log scale)", area.x + 24, plot.y + plot.height + 26, 13, C_TEXT2);
 
-    BeginScissorMode((int)plot.x, (int)plot.y - 4, (int)plot.width + 6, (int)plot.height + 8);
+    Scissor((int)plot.x, (int)plot.y - 4, (int)plot.width + 6, (int)plot.height + 8);
     for (const Curve& c : curves) {
         Tint t = tintFor(c.role);
         float gm[3]; midOf(t, gm);

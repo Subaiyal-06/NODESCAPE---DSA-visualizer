@@ -1,4 +1,5 @@
 #include "GUIApp.h"
+#include "rlgl.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -39,7 +40,7 @@ const char* GUIApp::viewName(View v) {
 
 int GUIApp::rowsFor(View v) const {
     Group g = groupOf(v);
-    if (g == G_LIST || g == G_STACK || g == G_QUEUE || g == G_TREE || g == G_HASH) return 2;
+    if (g == G_SORT || g == G_LIST || g == G_STACK || g == G_QUEUE || g == G_TREE || g == G_HASH) return 2;
     return 1;
 }
 
@@ -105,25 +106,27 @@ static Info infoFor(View v, const std::string& title) {
 //  Setup
 // ============================================================================
 
-static Font loadFont(const char* path, int size, bool& ok) {
-    if (!FileExists(path)) { ok = false; return GetFontDefault(); }
-    std::vector<int> cps;
-    for (int c = 32; c < 127; c++) cps.push_back(c);
-    int extra[] = { 0xB7, 0x2022, 0x2013, 0x2014, 0x2026, 0x2190, 0x2192, 0x2264, 0x2265, 0xB2 };
-    for (int c : extra) cps.push_back(c);
-    Font f = LoadFontEx(path, size, cps.data(), (int)cps.size());
-    if (f.texture.id == 0) { ok = false; return GetFontDefault(); }
-    SetTextureFilter(f.texture, TEXTURE_FILTER_BILINEAR);
-    return f;
-}
-
 GUIApp::GUIApp() {
     SetTraceLogLevel(LOG_WARNING);
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
-    InitWindow(W, H, "NodeScape");
-    SetWindowMinSize(1240, 740);
+    InitWindow(1360, 820, "NodeScape");
     SetTargetFPS(60);
     SetExitKey(0);
+
+    // the layout is designed for about 1360 x 820 units; ui says how many screen pixels one unit is
+    dpi = std::max(1.0f, GetWindowScaleDPI().x);
+    zoom = dpi >= 1.2f ? 1.0f : 1.2f;
+    ui = clampf(dpi * zoom, 1.0f, 2.2f);
+    int mon = GetCurrentMonitor();
+    float mw = (float)GetMonitorWidth(mon), mh = (float)GetMonitorHeight(mon);
+    float fit = std::min(1.0f, std::min(mw * 0.96f / (1360 * ui), (mh - 90.0f) / (820 * ui)));
+    ui = std::max(0.85f, ui * fit);
+    int pw = (int)(1360 * ui), ph = (int)(820 * ui);
+    SetWindowSize(pw, ph);
+    SetWindowPosition((int)std::max(0.0f, (mw - pw) / 2), (int)std::max(0.0f, (mh - ph) / 2 - 24));
+    SetWindowMinSize((int)(1240 * ui), (int)(740 * ui));
+    W = 1360;
+    H = 820;
 
     // window icon: three glowing bars
     Image icon = GenImageColor(64, 64, Color{ 11, 13, 18, 255 });
@@ -132,12 +135,6 @@ GUIApp::GUIApp() {
     ImageDrawRectangle(&icon, 42, 22, 12, 34, Color{ 255, 205, 86, 255 });
     SetWindowIcon(icon);
     UnloadImage(icon);
-
-    bool ok = true;
-    fontUI = loadFont("C:/Windows/Fonts/segoeui.ttf", 32, ok);
-    fontBold = loadFont("C:/Windows/Fonts/seguisb.ttf", 32, ok);
-    fontCode = loadFont("C:/Windows/Fonts/consola.ttf", 28, ok);
-    ownFonts = ok;
 
     inA.maxLen = 3;
     inB.maxLen = 3;
@@ -152,11 +149,7 @@ GUIApp::GUIApp() {
 }
 
 GUIApp::~GUIApp() {
-    if (ownFonts) {
-        UnloadFont(fontUI);
-        UnloadFont(fontBold);
-        UnloadFont(fontCode);
-    }
+    clearFonts();
     CloseWindow();
 }
 
@@ -214,12 +207,56 @@ void GUIApp::selectView(View v) {
 //  Text
 // ============================================================================
 
+// Fonts are loaded at the exact pixel size they are drawn at, so the letters are sharp.
+void GUIApp::clearFonts() {
+    for (auto& kv : fontCache) {
+        if (kv.second.texture.id != GetFontDefault().texture.id) UnloadFont(kv.second);
+    }
+    fontCache.clear();
+}
+
+const Font& GUIApp::fnt(const Font& face, float size) {
+    int idx = (&face == &fontBold) ? 1 : ((&face == &fontCode) ? 2 : 0);
+    int px = std::max(9, (int)std::lround(size * ui));
+    int key = idx * 1000 + px;
+    auto it = fontCache.find(key);
+    if (it != fontCache.end()) return it->second;
+    static const char* paths[3] = { "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/seguisb.ttf", "C:/Windows/Fonts/consola.ttf" };
+    Font f = GetFontDefault();
+    if (FileExists(paths[idx])) {
+        std::vector<int> cps;
+        for (int c = 32; c < 127; c++) cps.push_back(c);
+        int extra[] = { 0xB7, 0x2022, 0x2013, 0x2014, 0x2026, 0x2190, 0x2192, 0x2194, 0x2264, 0x2265, 0xB2 };
+        for (int c : extra) cps.push_back(c);
+        Font loaded = LoadFontEx(paths[idx], px, cps.data(), (int)cps.size());
+        if (loaded.texture.id != 0) {
+            SetTextureFilter(loaded.texture, TEXTURE_FILTER_BILINEAR);
+            f = loaded;
+        }
+    }
+    return fontCache.emplace(key, f).first->second;
+}
+
+Vector2 GUIApp::Mouse() const {
+    Vector2 m = GetMousePosition();
+    return { m.x / ui, m.y / ui };
+}
+
+void GUIApp::Scissor(float x, float y, float w, float h) {
+    BeginScissorMode((int)(x * ui), (int)(y * ui), (int)(w * ui), (int)(h * ui));
+}
+
 void GUIApp::Txt(const Font& f, const std::string& s, float x, float y, float size, Color c) {
-    DrawTextEx(f, s.c_str(), { std::floor(x), std::floor(y) }, size, 0.0f, c);
+    const Font& real = fnt(f, size);
+    float fs = (float)real.baseSize / ui;
+    // snap to whole screen pixels, otherwise the letters blur
+    Vector2 p = { std::round(x * ui) / ui, std::round(y * ui) / ui };
+    DrawTextEx(real, s.c_str(), p, fs, 0.0f, c);
 }
 
 float GUIApp::TxtW(const Font& f, const std::string& s, float size) {
-    return MeasureTextEx(f, s.c_str(), size, 0.0f).x;
+    const Font& real = fnt(f, size);
+    return MeasureTextEx(real, s.c_str(), (float)real.baseSize / ui, 0.0f).x;
 }
 
 void GUIApp::TxtC(const Font& f, const std::string& s, float cx, float y, float size, Color c) {
@@ -231,7 +268,7 @@ void GUIApp::TxtC(const Font& f, const std::string& s, float cx, float y, float 
 // ============================================================================
 
 bool GUIApp::Button(Rectangle r, const std::string& label, int style) {
-    Vector2 m = GetMousePosition();
+    Vector2 m = Mouse();
     bool hot = CheckCollisionPointRec(m, r);
     std::string key = label + std::to_string((int)r.x) + "_" + std::to_string((int)r.y);
     float& h = hover[key];
@@ -254,12 +291,14 @@ bool GUIApp::Button(Rectangle r, const std::string& label, int style) {
         DrawRectangleRoundedLinesEx(r, rad, 10, 1.0f, ColorAlpha(WHITE, 0.07f + 0.10f * h));
         TxtC(fontUI, label, r.x + r.width / 2, r.y + (r.height - 16) / 2 - 1, 16, ColorLerp(TEXT2, TEXT, h));
     }
-    return hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    bool clicked = hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    if (clicked) buttonHit = true;
+    return clicked;
 }
 
 // icon ids: 0 first, 1 previous, 2 play, 3 pause, 4 next, 5 last
 bool GUIApp::IconButton(Rectangle r, int icon, bool primary) {
-    Vector2 m = GetMousePosition();
+    Vector2 m = Mouse();
     bool hot = CheckCollisionPointRec(m, r);
     std::string key = "icon" + std::to_string(icon) + "_" + std::to_string((int)r.x);
     float& h = hover[key];
@@ -294,11 +333,13 @@ bool GUIApp::IconButton(Rectangle r, int icon, bool primary) {
         case 4: tri(cx, true); break;
         case 5: tri(cx - 2, true); DrawRectangleRounded({ cx + s - 1.5f, cy - s, 2.6f, s * 2 }, 0.5f, 4, fg); break;
     }
-    return hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    bool clicked = hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    if (clicked) buttonHit = true;
+    return clicked;
 }
 
 void GUIApp::Input(Rectangle r, InputBox& box, const char* hint) {
-    Vector2 m = GetMousePosition();
+    Vector2 m = Mouse();
     bool hot = CheckCollisionPointRec(m, r);
     if (hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) focusReq = &box;
 
@@ -366,7 +407,7 @@ void GUIApp::handleTyping() {
             inText.focused = true;
             target = &inText;
         }
-        else if (!target && digit && view != V_SORT && view != V_COMPLEX && view != V_STACK_APPS) {
+        else if (!target && digit && view != V_COMPLEX && view != V_STACK_APPS) {
             inA.focused = true;
             target = &inA;
         }
@@ -388,7 +429,19 @@ void GUIApp::handleTyping() {
     }
 }
 
+void GUIApp::applyZoom(float newZoom) {
+    zoom = clampf(newZoom, 0.8f, 1.8f);
+    ui = clampf(dpi * zoom, 0.85f, 2.4f);
+    clearFonts();
+    SetWindowMinSize((int)(1240 * ui), (int)(740 * ui));
+    toast("Zoom " + std::to_string((int)std::lround(zoom * 100)) + "%");
+}
+
 void GUIApp::handleKeys() {
+    bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    if (ctrl && (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD))) applyZoom(zoom + 0.1f);
+    if (ctrl && (IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT))) applyZoom(zoom - 0.1f);
+    if (ctrl && (IsKeyPressed(KEY_ZERO) || IsKeyPressed(KEY_KP_0))) applyZoom(dpi >= 1.2f ? 1.0f : 1.2f);
     if (inA.focused || inB.focused || inC.focused || inText.focused) return;
     Session& s = S();
     int last = (int)s.frames.size() - 1;
@@ -464,7 +517,7 @@ void GUIApp::drawTopBar() {
         float w = TxtW(fontBold, name, 16) + 26;
         Rectangle r = { x, 10, w, 38 };
         bool active = (current == (Group)g);
-        bool hot = CheckCollisionPointRec(GetMousePosition(), r);
+        bool hot = CheckCollisionPointRec(Mouse(), r);
         float& h = hover[std::string("tab") + name];
         h += ((hot ? 1.0f : 0.0f) - h) * (1.0f - std::exp(-dt * 14.0f));
         Color col = active ? TEXT : ColorLerp(TEXT2, TEXT, h);
@@ -478,7 +531,7 @@ void GUIApp::drawTopBar() {
         if (hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !active) selectView(lastView[g]);
         x += w + 2;
     }
-    std::string hint = "Space  play      \xE2\x86\x90 \xE2\x86\x92  step";
+    std::string hint = "Space  play     \xE2\x86\x90 \xE2\x86\x92  step     Ctrl + / -  zoom";
     Txt(fontUI, hint, W - 20 - TxtW(fontUI, hint, 13), 20, 13, MUTED);
 }
 
@@ -488,6 +541,7 @@ void GUIApp::drawToolbar() {
     tbH = 40;
 
     if (view == V_SORT) {
+        // row 1: algorithm and ready-made arrays
         tbY = 64;
         tbX = 24;
         tbLabel("Algorithm");
@@ -512,7 +566,6 @@ void GUIApp::drawToolbar() {
         if (rbtn("Shuffle")) { newArray(0); runSort(); playing = true; }
         rx -= 8;
         rx -= 118;
-        float rightEdge = rx - 50;
         Rectangle box = { rx, tbY, 118, tbH };
         DrawRectangleRounded(box, 0.32f, 10, PANEL2);
         DrawRectangleRoundedLinesEx(box, 0.32f, 10, 1.0f, ColorAlpha(WHITE, 0.08f));
@@ -521,16 +574,17 @@ void GUIApp::drawToolbar() {
         TxtC(fontBold, std::to_string(arraySize), rx + 59, tbY + 11, 17, TEXT);
         Txt(fontUI, "Size", rx - 40, tbY + 11, 14, MUTED);
 
-        // your own numbers: type them separated by spaces or commas
-        float room = rightEdge - tbX - 20;
-        if (room > 230) {
-            float w = std::min(360.0f, room - 96);
-            tbX += 12;
-            tbSep();
-            tbInput(inText, "your numbers, e.g. 8 3 9 1 5", w);
-            tbX -= 4;
-            if (tbBtn("Sort mine", 2)) applyCustomArray();
-        }
+        // row 2: your own numbers
+        tbY = 112;
+        tbX = 24;
+        tbLabel("Numbers");
+        tbInput(inA, "number", 84);
+        if (tbBtn("Add", 2)) act(0);
+        if (tbBtn("Remove selected")) act(1);
+        if (tbBtn("Remove value")) act(2);
+        tbSep();
+        tbInput(inText, "or type a whole list, e.g. 8 3 9 1 5", 330);
+        if (tbBtn("Sort my list", 2)) applyCustomArray();
         return;
     }
 
@@ -595,7 +649,7 @@ void GUIApp::drawCodePanel() {
     }
     float lineH = std::min(32.0f, (r.height - 70) / (float)s.code.size());
     float y0 = r.y + 58;
-    BeginScissorMode((int)r.x + 1, (int)r.y + 47, (int)r.width - 2, (int)r.height - 50);
+    Scissor((int)r.x + 1, (int)r.y + 47, (int)r.width - 2, (int)r.height - 50);
 
     if (active >= 0 && active < (int)s.code.size()) {
         float ty = y0 + active * lineH;
@@ -692,7 +746,7 @@ void GUIApp::drawPlayback() {
     std::string step = view == V_COMPLEX ? "n = " + std::to_string(s.index + 1) : "Step " + std::to_string(s.index + 1) + " of " + std::to_string(std::max(1, total));
     Txt(fontUI, step, tx, cy - 24, 14, TEXT2);
     Rectangle hit = { tx - 8, ty - 14, tw + 16, 28 };
-    Vector2 m = GetMousePosition();
+    Vector2 m = Mouse();
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, hit)) draggingScrub = true;
     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) draggingScrub = false;
     if (draggingScrub && total > 1) {
@@ -718,7 +772,7 @@ void GUIApp::drawToast() {
     toastTimer -= dt;
     float a = std::min(1.0f, toastTimer * 3.0f);
     float w = TxtW(fontUI, toastText, 16) + 44;
-    Rectangle r = { W / 2.0f - w / 2, stageRect.y + 94, w, 40 };
+    Rectangle r = { stageRect.x + stageRect.width / 2 - w / 2, stageRect.y + 10, w, 40 };
     float c[3] = { 255, 205, 86 };
     glowRect(r, 12, c, 0.25f * a, 12);
     DrawRectangleRounded(r, 0.4f, 10, ColorAlpha(Color{ 30, 26, 14, 255 }, a));
@@ -730,35 +784,47 @@ void GUIApp::drawToast() {
 //  Main loop
 // ============================================================================
 
+// one picture of the whole window. Everything is drawn in layout units and scaled by ui.
+void GUIApp::renderFrame() {
+    W = (int)std::ceil(GetScreenWidth() / ui);
+    H = (int)std::ceil(GetScreenHeight() / ui);
+    focusReq = nullptr;
+    buttonHit = false;
+    layout();
+    handleKeys();
+    updatePlayback();
+
+    BeginDrawing();
+    ClearBackground(BG);
+    rlPushMatrix();
+    rlScalef(ui, ui, 1.0f);
+    drawBackground();
+    drawStage();
+    drawCodePanel();
+    drawInfoPanel();
+    drawPlayback();
+    drawTopBar();
+    drawToolbar();
+    drawToast();
+
+    // A click gives the focus to the box under the mouse. Clicking a button keeps the focus, so you can
+    // type a number, press Add, and type the next one. This has to happen in the same frame as the draw
+    // calls above, which is the frame that saw the click.
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !buttonHit) {
+        inA.focused = (focusReq == &inA);
+        inB.focused = (focusReq == &inB);
+        inC.focused = (focusReq == &inC);
+        inText.focused = (focusReq == &inText);
+    }
+    rlPopMatrix();
+    EndDrawing();
+    handleTyping();
+}
+
 void GUIApp::run() {
     while (!WindowShouldClose()) {
-        W = GetScreenWidth();
-        H = GetScreenHeight();
         dt = fixedDt > 0 ? fixedDt : std::min(GetFrameTime(), 0.05f);
         now = GetTime();
-
-        focusReq = nullptr;
-        layout();
-        handleKeys();
-        updatePlayback();
-
-        BeginDrawing();
-        drawBackground();
-        drawStage();
-        drawCodePanel();
-        drawInfoPanel();
-        drawPlayback();
-        drawTopBar();
-        drawToolbar();
-        drawToast();
-        EndDrawing();
-
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            inA.focused = (focusReq == &inA);
-            inB.focused = (focusReq == &inB);
-            inC.focused = (focusReq == &inC);
-            inText.focused = (focusReq == &inText);
-        }
-        handleTyping();
+        renderFrame();
     }
 }

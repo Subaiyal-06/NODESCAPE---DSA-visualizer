@@ -85,6 +85,7 @@ void GUIApp::emptyPicture(const std::string& message, FrameKind kind) {
 // ============================================================================
 
 void GUIApp::runSort() {
+    selectedBar = -1;
     Recorder::setEnabled(true);
     Recorder::clear();
     std::vector<int> a = array;
@@ -102,6 +103,40 @@ void GUIApp::runSort() {
     view = V_SORT;
     captureSession(false);
     view = saved;
+}
+
+void GUIApp::addToArray(int value) {
+    if (array.size() >= 40) { toast("The picture holds up to 40 numbers."); return; }
+    if (value > 999) { toast("Use numbers from 0 to 999."); return; }
+    array.push_back(value);
+    arraySize = (int)array.size();
+    runSort();
+    playing = true;
+    toast(std::to_string(value) + " added at the end.");
+}
+
+// removes the clicked bar (selected = true) or the first bar that holds the typed value
+void GUIApp::removeFromArray(bool selected) {
+    int value = 0;
+    if (selected) {
+        const Frame* f = currentFrame();
+        if (selectedBar < 0 || !f || selectedBar >= (int)f->cells.size()) {
+            toast("Click a bar first to select it, then press Remove selected.");
+            return;
+        }
+        value = f->cells[selectedBar].value;
+    }
+    else if (!readA(value, "number")) {
+        return;
+    }
+    if (array.size() <= 2) { toast("Keep at least two numbers to sort."); return; }
+    auto it = std::find(array.begin(), array.end(), value);
+    if (it == array.end()) { toast(std::to_string(value) + " is not in the array."); return; }
+    array.erase(it);
+    arraySize = (int)array.size();
+    runSort();
+    playing = true;
+    toast(std::to_string(value) + " removed.");
 }
 
 // reads the numbers from the text box (spaces or commas between them) and sorts them step by step
@@ -302,8 +337,18 @@ void GUIApp::buildView(View v) {
 //  Operations
 // ============================================================================
 
+void GUIApp::actSort(int op) {
+    if (op == 0) {
+        int v = 0;
+        if (readA(v, "number")) addToArray(v);
+    }
+    else if (op == 1) removeFromArray(true);
+    else removeFromArray(false);
+}
+
 void GUIApp::act(int op) {
     switch (groupOf(view)) {
+        case G_SORT: actSort(op); break;
         case G_ARRAY: actArray(op); break;
         case G_LIST: actList(op); break;
         case G_STACK:
@@ -322,7 +367,7 @@ void GUIApp::act(int op) {
 
 void GUIApp::primaryAction() {
     switch (view) {
-        case V_SORT: applyCustomArray(); break;
+        case V_SORT: if (inText.focused) applyCustomArray(); else act(0); break;
         case V_ARRAY: act(0); break;
         case V_LIST_S: case V_LIST_D: case V_LIST_C: act(1); break;
         case V_STACK_ARR: case V_STACK_LINK: act(0); break;
@@ -971,6 +1016,7 @@ void GUIApp::shot(const std::string& file, int viewId, int sub, const std::strin
         if (tok[0] == 'D') { graphDirected = std::atoi(tok.c_str() + 1) != 0; sampleGraph(graphDirected); sessions[V_GRAPH].built = false; selectView(V_GRAPH); continue; }
         if (tok.compare(0, 2, "t=") == 0) { inText.text = tok.substr(2); continue; }
         if (tok == "c") { applyCustomArray(); continue; }
+        if (tok[0] == 's' && tok.size() > 1) { selectedBar = std::atoi(tok.c_str() + 1); continue; }
         // op:a:b:c
         std::vector<std::string> parts;
         size_t p = 0;
@@ -989,21 +1035,9 @@ void GUIApp::shot(const std::string& file, int viewId, int sub, const std::strin
     Session& s = S();
     s.index = std::max(0, std::min(step < 0 ? (int)s.frames.size() + step : step, (int)s.frames.size() - 1));
     for (int i = 0; i < 60; i++) {
-        W = GetScreenWidth();
-        H = GetScreenHeight();
         dt = fixedDt;
         now = i * 0.04;
-        layout();
-        BeginDrawing();
-        drawBackground();
-        drawStage();
-        drawCodePanel();
-        drawInfoPanel();
-        drawPlayback();
-        drawTopBar();
-        drawToolbar();
-        drawToast();
-        EndDrawing();
+        renderFrame();
     }
     TakeScreenshot(file.c_str());
 }

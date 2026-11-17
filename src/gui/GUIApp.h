@@ -22,6 +22,7 @@
 #include "../core/Graph.h"
 #include "../core/HashTable.h"
 #include "raylib.h"
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -76,8 +77,13 @@ public:
 private:
     // window and fonts
     int W = 1440, H = 900;
-    Font fontUI{}, fontBold{}, fontCode{};
-    bool ownFonts = false;
+    Font fontUI{}, fontBold{}, fontCode{};   // only used as handles: the real fonts are cached per pixel size
+    std::map<int, Font> fontCache;
+    float ui = 1.0f;       // pixels per layout unit (screen scaling times the zoom the user chose)
+    float dpi = 1.0f;
+    float zoom = 1.0f;
+    int selectedBar = -1;  // sorting: the bar that was clicked
+    bool buttonHit = false;
 
     // what is selected
     View view = V_SORT;
@@ -153,6 +159,8 @@ private:
     void emptyPicture(const std::string& message, FrameKind kind);
     void runSort();
     void applyCustomArray();   // sorts the numbers typed in the text box
+    void addToArray(int value);
+    void removeFromArray(bool selected);
     void newArray(int mode);
     void toast(const std::string& text);
     bool readA(int& value, const char* what = "value");
@@ -213,6 +221,15 @@ private:
     void handleTyping();
     void handleKeys();
     void updatePlayback();
+
+    // scaling, mouse and text
+    Vector2 Mouse() const;
+    void Scissor(float x, float y, float w, float h);
+    void renderFrame();
+    void applyZoom(float newZoom);
+    const Font& fnt(const Font& face, float size);
+    void clearFonts();
+    void drawChip(const Font& font, float cx, float yBottom, const std::string& text, const float* c);
 
     // text helpers
     void Txt(const Font& f, const std::string& s, float x, float y, float size, Color c);
