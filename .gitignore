@@ -1,0 +1,7 @@
+# build outputs
+build/
+*.exe
+*.o
+# local tool folders
+.agents/
+.claude/
