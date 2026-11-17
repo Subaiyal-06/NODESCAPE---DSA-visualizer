@@ -104,6 +104,31 @@ void GUIApp::runSort() {
     view = saved;
 }
 
+// reads the numbers from the text box (spaces or commas between them) and sorts them step by step
+void GUIApp::applyCustomArray() {
+    std::vector<int> values;
+    std::string token;
+    bool tooBig = false;
+    for (size_t i = 0; i <= inText.text.size(); i++) {
+        char c = i < inText.text.size() ? inText.text[i] : ' ';
+        if (c >= '0' && c <= '9') {
+            token += c;
+        }
+        else if (!token.empty()) {
+            if (token.size() > 3) tooBig = true;
+            else values.push_back(std::atoi(token.c_str()));
+            token.clear();
+        }
+    }
+    if (tooBig) { toast("Use numbers from 0 to 999."); return; }
+    if (values.size() < 2) { toast("Type at least two numbers, for example: 8 3 9 1 5"); inText.focused = true; return; }
+    if (values.size() > 40) { toast("The picture holds up to 40 numbers."); return; }
+    array = values;
+    arraySize = (int)values.size();
+    runSort();
+    playing = true;
+}
+
 void GUIApp::newArray(int mode) {
     if (mode == 0 || array.empty()) {
         array.clear();
@@ -297,6 +322,7 @@ void GUIApp::act(int op) {
 
 void GUIApp::primaryAction() {
     switch (view) {
+        case V_SORT: applyCustomArray(); break;
         case V_ARRAY: act(0); break;
         case V_LIST_S: case V_LIST_D: case V_LIST_C: act(1); break;
         case V_STACK_ARR: case V_STACK_LINK: act(0); break;
@@ -944,6 +970,7 @@ void GUIApp::shot(const std::string& file, int viewId, int sub, const std::strin
         if (tok[0] == 'm') { appsMode = recMode = std::atoi(tok.c_str() + 1); continue; }
         if (tok[0] == 'D') { graphDirected = std::atoi(tok.c_str() + 1) != 0; sampleGraph(graphDirected); sessions[V_GRAPH].built = false; selectView(V_GRAPH); continue; }
         if (tok.compare(0, 2, "t=") == 0) { inText.text = tok.substr(2); continue; }
+        if (tok == "c") { applyCustomArray(); continue; }
         // op:a:b:c
         std::vector<std::string> parts;
         size_t p = 0;

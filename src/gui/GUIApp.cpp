@@ -142,7 +142,7 @@ GUIApp::GUIApp() {
     inA.maxLen = 3;
     inB.maxLen = 3;
     inC.maxLen = 3;
-    inText.maxLen = 34;
+    inText.maxLen = 120;
     inText.anyText = true;
     for (int g = 0; g < G_COUNT; g++) lastView[g] = GROUP_VIEWS[g][0];
     newArray(0);
@@ -195,6 +195,11 @@ bool GUIApp::readB(int& value, const char* what) {
 void GUIApp::selectView(View v) {
     view = v;
     lastView[groupOf(v)] = v;
+    if (v == V_SORT) inText.text.clear();
+    if (v == V_STACK_APPS) {
+        static const char* defaults[3] = { "{[a+b]*(c-d)}", "a+b*(c-d)/e", "3 4 + 2 *" };
+        inText.text = defaults[appsMode];
+    }
     buildView(v);
     playing = false;
     inA.focused = inB.focused = inC.focused = inText.focused = false;
@@ -507,6 +512,7 @@ void GUIApp::drawToolbar() {
         if (rbtn("Shuffle")) { newArray(0); runSort(); playing = true; }
         rx -= 8;
         rx -= 118;
+        float rightEdge = rx - 50;
         Rectangle box = { rx, tbY, 118, tbH };
         DrawRectangleRounded(box, 0.32f, 10, PANEL2);
         DrawRectangleRoundedLinesEx(box, 0.32f, 10, 1.0f, ColorAlpha(WHITE, 0.08f));
@@ -514,6 +520,17 @@ void GUIApp::drawToolbar() {
         if (Button({ rx + 84, tbY + 4, 30, tbH - 8 }, "+", 0) && arraySize < 40) { arraySize++; newArray(3); runSort(); }
         TxtC(fontBold, std::to_string(arraySize), rx + 59, tbY + 11, 17, TEXT);
         Txt(fontUI, "Size", rx - 40, tbY + 11, 14, MUTED);
+
+        // your own numbers: type them separated by spaces or commas
+        float room = rightEdge - tbX - 20;
+        if (room > 230) {
+            float w = std::min(360.0f, room - 96);
+            tbX += 12;
+            tbSep();
+            tbInput(inText, "your numbers, e.g. 8 3 9 1 5", w);
+            tbX -= 4;
+            if (tbBtn("Sort mine", 2)) applyCustomArray();
+        }
         return;
     }
 

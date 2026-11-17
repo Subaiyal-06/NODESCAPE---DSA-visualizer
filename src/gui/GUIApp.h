@@ -152,6 +152,7 @@ private:
     void setRest(const std::string& message);
     void emptyPicture(const std::string& message, FrameKind kind);
     void runSort();
+    void applyCustomArray();   // sorts the numbers typed in the text box
     void newArray(int mode);
     void toast(const std::string& text);
     bool readA(int& value, const char* what = "value");

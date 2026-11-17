@@ -1011,6 +1011,12 @@ function renderFrame(frame) {
   }
 }
 
+// The simulators use readable state names; the stylesheet knows them under other names.
+function roleClass(role) {
+  const map = { checking: 'current', replaced: 'new', unswapped: 'removed', pivot: 'found' };
+  return map[role] || role || 'normal';
+}
+
 // Render Sorting Bars
 function renderBars(container, frame) {
   const barsWrap = document.createElement('div');
@@ -1035,7 +1041,7 @@ function renderBars(container, frame) {
     }
 
     const barEl = document.createElement('div');
-    barEl.className = `v-bar role-${cell.role || 'normal'}`;
+    barEl.className = `v-bar role-${roleClass(cell.role)}`;
     const heightPercent = Math.max(8, Math.round((cell.value / maxVal) * 88));
     barEl.style.height = `${heightPercent}%`;
 
@@ -1083,7 +1089,7 @@ function renderList(container, frame) {
     }
 
     const box = document.createElement('div');
-    box.className = `node-box role-${cell.role || 'normal'}`;
+    box.className = `node-box role-${roleClass(cell.role)}`;
     box.textContent = cell.value;
     item.appendChild(box);
 
